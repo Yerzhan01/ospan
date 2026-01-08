@@ -1,0 +1,414 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum UserRole {
+  ADMIN
+  TRACKER
+  DOCTOR
+  OPERATOR
+}
+
+enum PatientStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum PeriodStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum TimeSlot {
+  MORNING
+  AFTERNOON
+  EVENING
+}
+
+enum ResponseType {
+  TEXT
+  PHOTO
+  TEXT_AND_PHOTO
+  VOICE
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AlertType {
+  MISSED_RESPONSE
+  BAD_CONDITION
+  NO_PHOTO
+  CUSTOM
+}
+
+enum AlertStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+  ESCALATED
+}
+
+enum TaskType {
+  CALL
+  CHECK_PHOTO
+  SCHEDULE_VISIT
+  ESCALATE
+  CUSTOM
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+// ============================================
+// MODELS
+// ============================================
+
+/// Пользователи системы (админы, трекеры, врачи, операторы)
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  role         UserRole
+  fullName     String
+  phone        String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  deletedAt    DateTime?
+
+  // Связи
+  clinic   Clinic? @relation(fields: [clinicId], references: [id])
+  clinicId String?
+
+  // Пациенты, где этот пользователь является трекером
+  trackedPatients Patient[] @relation("TrackerPatients")
+  // Пациенты, где этот пользователь является врачом
+  doctorPatients  Patient[] @relation("DoctorPatients")
+  // Назначенные задачи
+  tasks           Task[]
+
+  @@map("users")
+}
+
+/// Клиники
+model Clinic {
+  id        String    @id @default(cuid())
+  name      String
+  address   String?
+  phone     String?
+  email     String?
+  settings  Json? // Настройки клиники (расписание, шаблоны и т.д.)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  // Связи
+  users    User[]
+  patients Patient[]
+
+  @@map("clinics")
+}
+
+/// Пациенты
+model Patient {
+  id               String        @id @default(cuid())
+  fullName         String
+  phone            String        @unique // WhatsApp ID
+  programStartDate DateTime
+  status           PatientStatus @default(ACTIVE)
+  currentPeriodId  String?
+  amoCrmLeadId     String? // ID лида в AmoCRM
+  metadata         Json? // Дополнительные данные (возраст, диагноз и т.д.)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  deletedAt        DateTime?
+
+  // Связи
+  clinic    Clinic? @relation(fields: [clinicId], references: [id])
+  clinicId  String?
+  tracker   User?   @relation("TrackerPatients", fields: [trackerId], references: [id])
+  trackerId String?
+  doctor    User?   @relation("DoctorPatients", fields: [doctorId], references: [id])
+  doctorId  String?
+
+  // Обратные связи
+  periods  Period[]
+  answers  Answer[]
+  alerts   Alert[]
+  tasks    Task[]
+  messages Message[]
+  dayLogs  DayLog[]
+  visits   Visit[]
+
+  @@index([phone])
+  @@index([status])
+  @@index([clinicId])
+  @@index([trackerId])
+  @@map("patients")
+}
+
+/// Периоды сопровождения (например: Адаптация, Восстановление)
+model Period {
+  id            String       @id @default(cuid())
+  name          String // Название периода
+  durationDays  Int // Длительность в днях
+  startDate     DateTime
+  endDate       DateTime?
+  status        PeriodStatus @default(ACTIVE)
+  settings      Json? // Настройки периода
+  completedDays Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  // Связи
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+
+  // Обратные связи
+  questionTemplates QuestionTemplate[]
+  answers           Answer[]
+  dayLogs           DayLog[]
+  visits            Visit[]
+
+  @@map("periods")
+}
+
+/// Шаблоны вопросов для каждого дня и времени
+model QuestionTemplate {
+  id           String       @id @default(cuid())
+  dayNumber    Int // День периода (1-42)
+  timeSlot     TimeSlot
+  questionText String
+  responseType ResponseType
+  isRequired   Boolean      @default(true)
+  order        Int          @default(0)
+  aiPrompt     String? // Промпт для анализа ответа ИИ
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  // Связи
+  period   Period @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  periodId String
+
+  // Обратные связи
+  answers Answer[]
+
+  @@unique([periodId, dayNumber, timeSlot, order])
+  @@map("question_templates")
+}
+
+/// Ответы пациентов
+model Answer {
+  id                 String    @id @default(cuid())
+  dayNumber          Int
+  timeSlot           TimeSlot
+  textContent        String?
+  photoUrl           String?
+  voiceUrl           String?
+  voiceTranscription String?
+  aiAnalysis         Json? // Результат анализа ИИ
+  riskLevel          RiskLevel @default(LOW)
+  isProcessed        Boolean   @default(false)
+  rawMessage         Json? // Сырое сообщение из WhatsApp
+  createdAt          DateTime  @default(now())
+
+  // Связи
+  patient            Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId          String
+  period             Period            @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  periodId           String
+  questionTemplate   QuestionTemplate? @relation(fields: [questionTemplateId], references: [id])
+  questionTemplateId String?
+
+  // Обратные связи
+  alerts Alert[]
+
+  @@index([patientId])
+  @@index([periodId])
+  @@index([dayNumber])
+  @@index([createdAt])
+  @@map("answers")
+}
+
+/// Лог дней (для календаря и отслеживания прогресса)
+model DayLog {
+  id                 String   @id @default(cuid())
+  dayNumber          Int
+  date               DateTime
+  status             String // completed, partial, missed, problem
+  morningCompleted   Boolean  @default(false)
+  afternoonCompleted Boolean  @default(false)
+  eveningCompleted   Boolean  @default(false)
+  notes              String?
+  completedBy        String? // userId если отмечено вручную
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  // Связи
+  period    Period  @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  periodId  String
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+
+  @@unique([periodId, dayNumber])
+  @@map("day_logs")
+}
+
+/// Алёрты (уведомления о проблемах)
+model Alert {
+  id          String      @id @default(cuid())
+  type        AlertType
+  status      AlertStatus @default(NEW)
+  title       String
+  description String?
+  riskLevel   RiskLevel
+  triggeredBy String // "system" или userId
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  metadata    Json?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Связи
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  answer    Answer? @relation(fields: [answerId], references: [id])
+  answerId  String?
+
+  // Обратные связи
+  tasks Task[]
+
+  @@index([patientId])
+  @@index([status])
+  @@index([createdAt])
+  @@map("alerts")
+}
+
+/// Задачи для сотрудников
+model Task {
+  id           String     @id @default(cuid())
+  type         TaskType
+  title        String
+  description  String?
+  status       TaskStatus @default(PENDING)
+  priority     Int        @default(0)
+  dueDate      DateTime?
+  completedAt  DateTime?
+  amoCrmTaskId String? // ID задачи в AmoCRM
+  metadata     Json?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  // Связи
+  alert        Alert?  @relation(fields: [alertId], references: [id])
+  alertId      String?
+  patient      Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId    String
+  assignedTo   User    @relation(fields: [assignedToId], references: [id])
+  assignedToId String
+
+  @@index([assignedToId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("tasks")
+}
+
+/// Лог сообщений WhatsApp
+model Message {
+  id                String   @id @default(cuid())
+  direction         String // incoming / outgoing
+  messageType       String // text / photo / voice / template
+  content           String?
+  mediaUrl          String?
+  whatsappMessageId String?
+  templateName      String?
+  status            String // sent / delivered / read / failed
+  metadata          Json?
+  createdAt         DateTime @default(now())
+
+  // Связи
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+
+  @@index([patientId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+/// Аудит действий в системе
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  action     String // create, update, delete, login, etc.
+  entityType String // Patient, Alert, Task, etc.
+  entityId   String
+  changes    Json? // Что изменилось
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType])
+  @@index([entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+/// Визиты пациентов в клинику
+model Visit {
+  id            String    @id @default(cuid())
+  scheduledDate DateTime
+  actualDate    DateTime?
+  status        String // scheduled / completed / missed / rescheduled
+  notes         String?
+  completedBy   String? // userId
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Связи
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  period    Period? @relation(fields: [periodId], references: [id])
+  periodId  String?
+
+  @@map("visits")
+}
+
+model IntegrationSettings {
+  id            String    @id @default(cuid())
+  type          String    @unique // 'whatsapp' | 'amocrm'
+  isEnabled     Boolean   @default(false)
+  credentials   String    // JSON string (encrypted)
+  status        String    @default("disconnected") // connected, pending_auth, disconnected, error
+  lastCheckedAt DateTime?
+  lastError     String?
+  metadata      String?   // JSON string
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  @@map("integration_settings")
+}

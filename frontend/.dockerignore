@@ -1,0 +1,23 @@
+# Dependencies
+node_modules
+
+# Build output
+.next
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile*
+.dockerignore
