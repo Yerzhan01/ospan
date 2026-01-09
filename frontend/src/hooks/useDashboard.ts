@@ -23,27 +23,39 @@ const fetchPatientStats = async (): Promise<PatientDashboardStats> => {
 };
 
 const fetchAlertStats = async (): Promise<AlertStats> => {
-    const { data } = await api.get('/alerts/stats');
-    return data.data;
-};
-
-// Fallback for tasks since no specific stats endpoint exists yet
-// We will approximate or fetching list would be heavy.
-// Ideall backend taskStats endpoint should be created.
-// For now, we returns dummy or fetch query if list allows meta.total
-const fetchTaskStats = async (): Promise<TaskStats> => {
-    // This is temporary until backend endpoint exists
-    // Return mock data since /tasks/my endpoint doesn't support filters yet
     try {
-        const { data: todayData } = await api.get('/tasks/my');
+        const { data } = await api.get('/alerts/stats');
+        const stats = data.data;
+        // Backend returns: { NEW: 5, IN_PROGRESS: 2, CRITICAL: 1, ... }
+        // We map to frontend interface
         return {
-            total: todayData?.data?.length || 0,
-            pending: todayData?.data?.filter((t: any) => t.status === 'PENDING')?.length || 0,
-            overdue: 2, // Mock - need backend endpoint
-            today: 3 // Mock - need backend endpoint
+            total: (stats.NEW || 0) + (stats.IN_PROGRESS || 0) + (stats.ESCALATED || 0),
+            new: stats.NEW || 0,
+            inProgress: (stats.IN_PROGRESS || 0) + (stats.ESCALATED || 0),
+            critical: stats.CRITICAL || 0
         };
     } catch {
-        // Return mock data if endpoint fails
+        return { total: 0, new: 0, inProgress: 0, critical: 0 };
+    }
+};
+
+const fetchTaskStats = async (): Promise<TaskStats> => {
+    try {
+        const { data: response } = await api.get('/tasks/my');
+        const tasks = response.data || { overdue: [], today: [], upcoming: [] };
+
+        const overdueCount = tasks.overdue?.length || 0;
+        const todayCount = tasks.today?.length || 0;
+        const upcomingCount = tasks.upcoming?.length || 0;
+        const total = overdueCount + todayCount + upcomingCount;
+
+        return {
+            total,
+            pending: total,
+            overdue: overdueCount,
+            today: todayCount
+        };
+    } catch {
         return {
             total: 0,
             pending: 0,
@@ -53,18 +65,21 @@ const fetchTaskStats = async (): Promise<TaskStats> => {
     }
 };
 
+import { format, parseISO } from 'date-fns';
+import { ru } from 'date-fns/locale';
+
 const fetchActivityStats = async (): Promise<{ date: string; count: number }[]> => {
-    // Mocking activity chart data
-    // In real app, this should be /answers/stats or /activity/stats
-    return [
-        { date: 'Пн', count: 12 },
-        { date: 'Вт', count: 19 },
-        { date: 'Ср', count: 15 },
-        { date: 'Чт', count: 22 },
-        { date: 'Пт', count: 28 },
-        { date: 'Сб', count: 14 },
-        { date: 'Вс', count: 8 },
-    ];
+    try {
+        const { data } = await api.get('/answers/stats?days=7');
+        // Format dates for display (e.g., "Pn", "Vt" or "01.01")
+        return data.data.map((item: { date: string; count: number }) => ({
+            date: format(parseISO(item.date), 'dd.MM', { locale: ru }),
+            count: item.count
+        }));
+    } catch (e) {
+        console.error('Failed to fetch activity stats', e);
+        return [];
+    }
 };
 
 export const dashboardKeys = {

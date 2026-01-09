@@ -34,7 +34,7 @@ export interface Task {
 
 export interface TaskFilters {
     assignedToId?: string; // "me" or specific ID
-    status?: TaskStatus;
+    status?: TaskStatus | 'all';
     type?: TaskType;
     isOverdue?: boolean;
     patientId?: string;

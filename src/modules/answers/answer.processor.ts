@@ -85,20 +85,19 @@ export class AnswerProcessor {
     }
 
     private async createAlert(answer: any, analysisResult: any) {
-        const prisma = await getPrisma();
+        // Use AlertService to ensure task creation and notifications
+        const { alertService } = await import('../alerts/alert.service.js');
+        const { AlertType, RiskLevel } = await import('@prisma/client');
 
-        const alert = await prisma.alert.create({
-            data: {
-                patientId: answer.patientId,
-                type: AlertType.BAD_CONDITION,
-                riskLevel: analysisResult.riskLevel as RiskLevel,
-                title: 'High Risk Answer Detected',
-                description: analysisResult.summary || analysisResult.alertReason || 'High risk detected by AI',
-                status: 'NEW',
-                triggeredBy: 'system',
-                answerId: answer.id,
-                metadata: analysisResult as any
-            }
+        const alert = await alertService.create({
+            patientId: answer.patientId,
+            type: AlertType.BAD_CONDITION,
+            riskLevel: analysisResult.riskLevel as RiskLevel,
+            title: 'High Risk Answer Detected',
+            description: analysisResult.summary || analysisResult.alertReason || 'High risk detected by AI',
+            triggeredBy: 'system',
+            answerId: answer.id,
+            metadata: analysisResult
         });
 
         logger.warn({
@@ -109,6 +108,7 @@ export class AnswerProcessor {
         // Create Task in AmoCRM if High Risk
         if (analysisResult.riskLevel === 'HIGH' || analysisResult.riskLevel === 'CRITICAL') {
             try {
+                const prisma = await getPrisma();
                 // Fetch patient to get AmoCRM ID
                 const patient = await prisma.patient.findUnique({
                     where: { id: answer.patientId }

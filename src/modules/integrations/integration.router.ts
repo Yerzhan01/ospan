@@ -10,6 +10,10 @@ export async function integrationRouter(fastify: FastifyInstance) {
     // Get all statuses
     fastify.get('/', integrationController.getStatus);
 
+    // OpenAI
+    fastify.put('/openai/credentials', integrationController.saveOpenAICredentials);
+    fastify.delete('/openai/disconnect', integrationController.disconnectOpenAI);
+
     // WhatsApp
     fastify.get('/whatsapp', integrationController.getWhatsAppStatus);
     fastify.post('/whatsapp', integrationController.saveWhatsAppCredentials);
@@ -23,5 +27,6 @@ export async function integrationRouter(fastify: FastifyInstance) {
     fastify.post('/amocrm/callback', integrationController.handleAmoCRMCallback);
     fastify.get('/amocrm/callback', integrationController.handleAmoCRMCallback);
     fastify.post('/amocrm/sync', integrationController.syncAmoCRMPipelines);
+    fastify.post('/amocrm/mapping', integrationController.saveAmoCRMMapping);
     fastify.post('/amocrm/disconnect', integrationController.disconnectAmoCRM);
 }

@@ -15,7 +15,7 @@ export const taskKeys = {
 const fetchTasks = async (filters: TaskFilters): Promise<Task[]> => {
     const params = new URLSearchParams();
     if (filters.assignedToId) params.append('assignedToId', filters.assignedToId);
-    if (filters.status && filters.status !== 'all' as any) params.append('status', filters.status);
+    if (filters.status && filters.status !== 'all') params.append('status', filters.status);
     if (filters.type) params.append('type', filters.type);
     if (filters.isOverdue) params.append('isOverdue', 'true');
     if (filters.patientId) params.append('patientId', filters.patientId);
@@ -38,11 +38,13 @@ export function useTasks(filters: TaskFilters) {
 
 export function useMyTasks() {
     const user = useAuthStore(state => state.user);
-    // Assuming backend handles "me" or filtering by current user ID is manual.
-    // Let's pass the user ID if available, or rely on backend default if not passed (though specific id is safer)
+    // ADMIN sees all tasks, others see only their assigned tasks
+    const isAdmin = user?.role === 'ADMIN';
+    const filters = isAdmin ? {} : { assignedToId: user?.id };
+
     return useQuery({
-        queryKey: taskKeys.list({ assignedToId: user?.id }),
-        queryFn: () => fetchTasks({ assignedToId: user?.id }),
+        queryKey: taskKeys.list(filters),
+        queryFn: () => fetchTasks(filters),
         enabled: !!user?.id,
     });
 }

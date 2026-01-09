@@ -6,7 +6,9 @@ import {
     AmoCRMStatusResponse,
     SaveWhatsAppCredentialsDto,
     SaveAmoCRMCredentialsDto,
-    TestWhatsAppMessageDto
+    SaveAmoCRMMappingDto,
+    TestWhatsAppMessageDto,
+    SaveOpenAICredentialsDto
 } from '../types/integration';
 import { toast } from 'sonner';
 
@@ -117,6 +119,20 @@ export const useIntegrations = () => {
         }
     });
 
+    const saveAmoCRMMappingMutation = useMutation({
+        mutationFn: async (mapping: Record<string, number>) => {
+            const { data } = await api.post('/integrations/amocrm/mapping', { mapping });
+            return data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['integrations'] });
+            toast.success('Mapping saved');
+        },
+        onError: () => {
+            toast.error('Failed to save mapping');
+        }
+    });
+
     const disconnectAmoCRMMutation = useMutation({
         mutationFn: async () => {
             await api.post('/integrations/amocrm/disconnect');
@@ -148,7 +164,33 @@ export const useIntegrations = () => {
             status: amocrmStatus,
             save: saveAmoCRMMutation,
             disconnect: disconnectAmoCRMMutation,
-            sync: syncAmoCRMMutation
+            sync: syncAmoCRMMutation,
+            saveMapping: saveAmoCRMMappingMutation
+        },
+
+        openai: {
+            status: integrations?.find(i => i.type === 'openai'),
+            save: useMutation({
+                mutationFn: async (creds: SaveOpenAICredentialsDto) => {
+                    const { data } = await api.put('/integrations/openai/credentials', creds);
+                    return data;
+                },
+                onSuccess: () => {
+                    queryClient.invalidateQueries({ queryKey: ['integrations'] });
+                    toast.success('OpenAI API Key saved');
+                },
+                onError: () => toast.error('Failed to save OpenAI credentials')
+            }),
+            disconnect: useMutation({
+                mutationFn: async () => {
+                    await api.delete('/integrations/openai/disconnect');
+                },
+                onSuccess: () => {
+                    queryClient.invalidateQueries({ queryKey: ['integrations'] });
+                    toast.success('OpenAI disconnected');
+                },
+                onError: () => toast.error('Failed to disconnect OpenAI')
+            })
         }
-    };
+    }
 };

@@ -166,6 +166,25 @@ export class WhatsAppService {
             return null;
         }
     }
+
+    /**
+     * Download media from URL
+     */
+    async downloadMedia(mediaUrl: string): Promise<Buffer | null> {
+        try {
+            const response = await fetch(mediaUrl);
+            if (!response.ok) {
+                logger.error({ status: response.status, url: mediaUrl }, 'Failed to fetch media');
+                return null;
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            return Buffer.from(arrayBuffer);
+        } catch (error) {
+            logger.error({ err: error, url: mediaUrl }, 'Failed to download media');
+            return null;
+        }
+    }
 }
+
 
 export const whatsappService = new WhatsAppService();

@@ -13,7 +13,7 @@ export class TaskService {
     async create(data: CreateTaskDto): Promise<TaskWithRelations> {
         const prisma = await getPrisma();
 
-        const task = await prisma.task.create({
+        const createdTask = await prisma.task.create({
             data: {
                 ...data,
                 status: TaskStatus.PENDING,
@@ -26,6 +26,9 @@ export class TaskService {
             }
         });
 
+        // Cast to TaskWithRelations since we included relations
+        const task = createdTask as unknown as TaskWithRelations;
+
         // Notify Assignee (if they have phone and it's urgent?)
         // Simple notification logic
         if (task.assignedTo.phone) {
@@ -36,7 +39,7 @@ export class TaskService {
         }
 
         logger.info({ taskId: task.id }, 'Task created');
-        return task as unknown as TaskWithRelations;
+        return task;
     }
 
     /**
@@ -173,6 +176,45 @@ export class TaskService {
                 logger.warn({ err }, 'Failed to notify new assignee');
             });
         }
+
+        return task as unknown as TaskWithRelations;
+    }
+
+    /**
+     * Find tasks by patient ID
+     */
+    async findByPatient(patientId: string): Promise<TaskWithRelations[]> {
+        const prisma = await getPrisma();
+        const tasks = await prisma.task.findMany({
+            where: { patientId },
+            include: {
+                patient: true,
+                assignedTo: true,
+                alert: true
+            },
+            orderBy: [
+                { status: 'asc' }, // PENDING first
+                { dueDate: 'desc' }
+            ]
+        });
+        return tasks as unknown as TaskWithRelations[];
+    }
+
+    /**
+     * Update task details (full update)
+     */
+    async update(id: string, data: UpdateTaskDto): Promise<TaskWithRelations> {
+        const prisma = await getPrisma();
+
+        const task = await prisma.task.update({
+            where: { id },
+            data,
+            include: {
+                patient: true,
+                assignedTo: true,
+                alert: true
+            }
+        });
 
         return task as unknown as TaskWithRelations;
     }

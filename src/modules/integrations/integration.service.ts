@@ -13,8 +13,71 @@ import {
 } from './integration.types.js';
 import { logger } from '../../common/utils/logger.js';
 import { AmoCRMConfig } from '../../integrations/amocrm/amocrm.types.js';
+import { aiService } from '../../integrations/ai/ai.service.js';
+import { SaveOpenAICredentialsDto, OpenAIStatusResponse } from './integration.types.js';
 
 class IntegrationService {
+
+    // ===== OpenAI =====
+
+    async getOpenAIStatus(): Promise<OpenAIStatusResponse> {
+        const prisma = await getPrisma();
+        const settings = await prisma.integrationSettings.findUnique({
+            where: { type: 'openai' }
+        });
+
+        // Check if service has key
+        const isConfigured = aiService.hasApiKey();
+        const isEnabled = settings?.isEnabled ?? false;
+
+        return {
+            type: 'openai',
+            isEnabled,
+            isConfigured,
+            status: isConfigured ? 'connected' : 'disconnected',
+            lastCheckedAt: settings?.lastCheckedAt || null,
+            lastError: settings?.lastError || null,
+            model: settings?.metadata ? JSON.parse(settings.metadata).model : 'gpt-4o'
+        };
+    }
+
+    async saveOpenAICredentials(dto: SaveOpenAICredentialsDto) {
+        const prisma = await getPrisma();
+        const credentials = JSON.stringify({ apiKey: dto.apiKey });
+        const encrypted = encrypt(credentials);
+
+        await prisma.integrationSettings.upsert({
+            where: { type: 'openai' },
+            create: {
+                type: 'openai',
+                isEnabled: true,
+                credentials: encrypted,
+                status: 'connected',
+                metadata: JSON.stringify({ model: dto.model || 'gpt-4o' })
+            },
+            update: {
+                isEnabled: true,
+                credentials: encrypted,
+                status: 'connected',
+                metadata: JSON.stringify({ model: dto.model || 'gpt-4o' })
+            }
+        });
+
+        // Update AI Service
+        aiService.updateConfig(dto.apiKey, dto.model);
+
+        return this.getOpenAIStatus();
+    }
+
+    async disconnectOpenAI() {
+        const prisma = await getPrisma();
+        await prisma.integrationSettings.update({
+            where: { type: 'openai' },
+            data: { isEnabled: false, status: 'disconnected', credentials: '' }
+        });
+        aiService.updateConfig('', ''); // Clear key
+        return { success: true };
+    }
 
     // ===== WhatsApp =====
 
@@ -138,9 +201,12 @@ class IntegrationService {
         }
 
         let pipelines = [];
+        let mapping = {};
         if (settings?.metadata) {
             try {
-                pipelines = JSON.parse(settings.metadata).pipelines || [];
+                const meta = JSON.parse(settings.metadata);
+                pipelines = meta.pipelines || [];
+                mapping = meta.mapping || {};
             } catch (e) { }
         }
 
@@ -151,7 +217,8 @@ class IntegrationService {
             status,
             lastCheckedAt: settings?.lastCheckedAt || null,
             lastError: settings?.lastError || null,
-            pipelines
+            pipelines,
+            mapping
         };
     }
 
@@ -203,6 +270,13 @@ class IntegrationService {
         const creds = JSON.parse(decrypt(settings.credentials));
         const redirectUri = creds.redirectUri || process.env.AMOCRM_REDIRECT_URI || 'http://localhost:3000/api/v1/integrations/amocrm/callback';
 
+        logger.info({
+            redirectUri,
+            subdomain: creds.subdomain,
+            clientId: creds.clientId,
+            hasClientSecret: !!creds.clientSecret
+        }, 'AmoCRM callback - exchanging code for token');
+
         // Exchange code
         const tokens = await amoCRMAuthService.handleCallback(
             code,
@@ -242,15 +316,41 @@ class IntegrationService {
         const prisma = await getPrisma();
         const pipelines = await amoCRMService.getPipelines();
 
+        const settings = await prisma.integrationSettings.findUnique({ where: { type: 'amocrm' } });
+        const currentMeta = settings?.metadata ? JSON.parse(settings.metadata) : {};
+
         await prisma.integrationSettings.update({
             where: { type: 'amocrm' },
             data: {
-                metadata: JSON.stringify({ pipelines }),
+                metadata: JSON.stringify({ ...currentMeta, pipelines }),
                 lastCheckedAt: new Date()
             }
         });
 
         return pipelines;
+    }
+
+    async saveAmoCRMMapping(mapping: Record<string, number>) {
+        const prisma = await getPrisma();
+        const settings = await prisma.integrationSettings.findUnique({ where: { type: 'amocrm' } });
+
+        const currentMeta = settings?.metadata ? JSON.parse(settings.metadata) : {};
+
+        await prisma.integrationSettings.upsert({
+            where: { type: 'amocrm' },
+            create: {
+                type: 'amocrm',
+                isEnabled: true,
+                status: 'disconnected',
+                metadata: JSON.stringify({ ...currentMeta, mapping }),
+                credentials: ''
+            },
+            update: {
+                metadata: JSON.stringify({ ...currentMeta, mapping })
+            }
+        });
+
+        return mapping;
     }
 
     async disconnectAmoCRM() {
@@ -269,7 +369,8 @@ class IntegrationService {
     async getAllIntegrations(): Promise<IntegrationStatus[]> {
         const wa = await this.getWhatsAppStatus();
         const amo = await this.getAmoCRMStatus();
-        return [wa, amo];
+        const openai = await this.getOpenAIStatus();
+        return [wa, amo, openai];
     }
 }
 

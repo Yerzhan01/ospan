@@ -35,7 +35,13 @@ export class PatientController {
      */
     getById = async (request: FastifyRequest, reply: FastifyReply) => {
         const { id } = patientIdSchema.parse(request.params);
+        const { user } = request;
         const patient = await this.service.findById(id);
+
+        // DOCTOR can only view patients assigned to them
+        if (user?.role === 'DOCTOR' && patient.doctorId !== user.userId) {
+            throw new AppError('Нет доступа к данным этого пациента', 403, 'FORBIDDEN');
+        }
 
         return reply.send({
             success: true,
@@ -49,6 +55,16 @@ export class PatientController {
     list = async (request: FastifyRequest, reply: FastifyReply) => {
         const query = patientFiltersSchema.parse(request.query);
         const { page, limit, ...filters } = query;
+        const { user } = request;
+
+        // DOCTOR can only see their own assigned patients
+        if (user?.role === 'DOCTOR') {
+            filters.doctorId = user.userId;
+        }
+        // TRACKER can see patients assigned to them (optional - can be removed if trackers should see all)
+        // if (user?.role === 'TRACKER') {
+        //     filters.trackerId = user.userId;
+        // }
 
         const { items, total } = await this.service.list(filters, page, limit);
 
@@ -126,6 +142,34 @@ export class PatientController {
         return reply.send({
             success: true,
             data: stats,
+        });
+    };
+
+    /**
+     * Получение списка задач пациента
+     */
+    getTasks = async (request: FastifyRequest, reply: FastifyReply) => {
+        const { id } = patientIdSchema.parse(request.params);
+
+        // Check permissions (DOCTOR can only see own patients)
+        const user = request.user as { userId: string; role: string; id?: string };
+        const userId = user.userId || user.id;
+
+        if (!userId) {
+            throw AppError.unauthorized('User ID not found in token');
+        }
+
+        const patient = await this.service.findById(id);
+        if (user?.role === 'DOCTOR' && patient.doctorId !== userId) {
+            throw new AppError('Нет доступа к данным этого пациента', 403, 'FORBIDDEN');
+        }
+
+        const { taskService } = await import('../tasks/task.service.js');
+        const tasks = await taskService.findByPatient(id);
+
+        return reply.send({
+            success: true,
+            data: tasks,
         });
     };
 }

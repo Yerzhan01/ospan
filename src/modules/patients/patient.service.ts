@@ -276,8 +276,8 @@ export class PatientService {
     }
 
     /**
-     * Получение данных для календаря (упрощённая версия)
-     * Возвращает DayLogs за период
+     * Получение данных для календаря (6x7 = 42 дня)
+     * Возвращает массив PatientCalendarDay для фронтенда
      */
     async getCalendar(patientId: string, periodId?: string) {
         const prisma = await getPrisma();
@@ -288,19 +288,123 @@ export class PatientService {
         if (!targetPeriodId) {
             const patient = await prisma.patient.findUnique({
                 where: { id: patientId },
-                select: { currentPeriodId: true },
+                select: { currentPeriodId: true, programStartDate: true },
             });
             targetPeriodId = patient?.currentPeriodId || undefined;
         }
 
-        if (!targetPeriodId) return [];
+        // Получаем период для дат
+        const period = targetPeriodId ? await prisma.period.findUnique({
+            where: { id: targetPeriodId },
+            select: { startDate: true, durationDays: true },
+        }) : null;
 
-        return prisma.dayLog.findMany({
+        if (!period) {
+            // Возвращаем пустой календарь на 42 дня если период не найден
+            const patient = await prisma.patient.findUnique({
+                where: { id: patientId },
+                select: { programStartDate: true },
+            });
+            const startDate = patient?.programStartDate || new Date();
+            return this.generateEmptyCalendar(startDate, 42);
+        }
+
+        // Получаем DayLogs
+        const dayLogs = await prisma.dayLog.findMany({
             where: {
-                periodId: targetPeriodId,
+                periodId: targetPeriodId!,
                 patientId: patientId,
             },
             orderBy: { dayNumber: 'asc' },
         });
+
+        // Создаём Map для быстрого поиска
+        const dayLogMap = new Map(dayLogs.map(log => [log.dayNumber, log]));
+
+        // Генерируем 42 дня
+        const durationDays = Math.min(period.durationDays || 42, 42);
+        const calendar: Array<{
+            date: string;
+            dayNumber: number;
+            status: 'empty' | 'completed' | 'missed' | 'future';
+            tasks: Array<{ id: string; type: 'question' | 'task'; status: 'pending' | 'completed' | 'missed' }>;
+        }> = [];
+
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        for (let day = 1; day <= 42; day++) {
+            const date = new Date(period.startDate);
+            date.setDate(date.getDate() + day - 1);
+            const dateStr = date.toISOString().split('T')[0];
+
+            const dayLog = dayLogMap.get(day);
+            const isFuture = date > today;
+            const isPast = date < today;
+
+            let status: 'empty' | 'completed' | 'missed' | 'future' = 'empty';
+            const tasks: Array<{ id: string; type: 'question' | 'task'; status: 'pending' | 'completed' | 'missed' }> = [];
+
+            if (day <= durationDays) {
+                if (isFuture) {
+                    status = 'future';
+                    // Add pending tasks for future days
+                    tasks.push(
+                        { id: `${day}-morning`, type: 'question', status: 'pending' },
+                        { id: `${day}-afternoon`, type: 'question', status: 'pending' },
+                        { id: `${day}-evening`, type: 'question', status: 'pending' }
+                    );
+                } else if (dayLog) {
+                    // Determine status based on completions
+                    const completedCount = [dayLog.morningCompleted, dayLog.afternoonCompleted, dayLog.eveningCompleted].filter(Boolean).length;
+                    if (completedCount === 3) {
+                        status = 'completed';
+                    } else if (completedCount > 0) {
+                        status = 'completed'; // partial is shown as completed for simplicity
+                    } else if (isPast) {
+                        status = 'missed';
+                    }
+
+                    // Add task statuses
+                    tasks.push(
+                        { id: `${day}-morning`, type: 'question', status: dayLog.morningCompleted ? 'completed' : (isPast ? 'missed' : 'pending') },
+                        { id: `${day}-afternoon`, type: 'question', status: dayLog.afternoonCompleted ? 'completed' : (isPast ? 'missed' : 'pending') },
+                        { id: `${day}-evening`, type: 'question', status: dayLog.eveningCompleted ? 'completed' : (isPast ? 'missed' : 'pending') }
+                    );
+                } else if (isPast) {
+                    status = 'missed';
+                    tasks.push(
+                        { id: `${day}-morning`, type: 'question', status: 'missed' },
+                        { id: `${day}-afternoon`, type: 'question', status: 'missed' },
+                        { id: `${day}-evening`, type: 'question', status: 'missed' }
+                    );
+                }
+            }
+
+            calendar.push({ date: dateStr, dayNumber: day, status, tasks });
+        }
+
+        return calendar;
+    }
+
+    private generateEmptyCalendar(startDate: Date, days: number) {
+        const calendar = [];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        for (let day = 1; day <= days; day++) {
+            const date = new Date(startDate);
+            date.setDate(date.getDate() + day - 1);
+            const dateStr = date.toISOString().split('T')[0];
+            const isFuture = date > today;
+
+            calendar.push({
+                date: dateStr,
+                dayNumber: day,
+                status: isFuture ? 'future' : 'empty',
+                tasks: [],
+            });
+        }
+        return calendar;
     }
 }

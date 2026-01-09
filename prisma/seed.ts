@@ -1,6 +1,6 @@
 import bcrypt from 'bcrypt';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient, UserRole, PatientStatus, PeriodStatus, TimeSlot, ResponseType } from '@prisma/client';
+import { PrismaClient, UserRole, PatientStatus, PeriodStatus, TimeSlot, ResponseType, AlertType, AlertStatus, TaskType, TaskStatus, RiskLevel } from '@prisma/client';
 import pg from 'pg';
 import 'dotenv/config';
 
@@ -26,11 +26,20 @@ const CLINIC_DATA = {
     email: 'info@clinic-zdorovie.kz',
 };
 
+// Default passwords for seed - OVERRIDE VIA ENV VARS IN PRODUCTION
+const DEFAULT_ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || 'ChangeMe!Admin2024';
+const DEFAULT_TRACKER_PASSWORD = process.env.SEED_TRACKER_PASSWORD || 'ChangeMe!Tracker2024';
+const DEFAULT_DOCTOR_PASSWORD = process.env.SEED_DOCTOR_PASSWORD || 'ChangeMe!Doctor2024';
+
+if (!process.env.SEED_ADMIN_PASSWORD) {
+    console.warn('⚠️  WARNING: Using default seed passwords. Set SEED_*_PASSWORD env vars in production!');
+}
+
 const USERS_DATA = [
-    { email: 'admin@clinic.com', password: 'admin123', role: UserRole.ADMIN, fullName: 'Администратор Системы' },
-    { email: 'tracker1@clinic.com', password: 'tracker123', role: UserRole.TRACKER, fullName: 'Трекер Первый' },
-    { email: 'tracker2@clinic.com', password: 'tracker123', role: UserRole.TRACKER, fullName: 'Трекер Второй' },
-    { email: 'doctor@clinic.com', password: 'doctor123', role: UserRole.DOCTOR, fullName: 'Доктор Иванов' },
+    { email: 'admin@clinic.com', password: DEFAULT_ADMIN_PASSWORD, role: UserRole.ADMIN, fullName: 'Администратор Системы' },
+    { email: 'tracker1@clinic.com', password: DEFAULT_TRACKER_PASSWORD, role: UserRole.TRACKER, fullName: 'Трекер Первый' },
+    { email: 'tracker2@clinic.com', password: DEFAULT_TRACKER_PASSWORD, role: UserRole.TRACKER, fullName: 'Трекер Второй' },
+    { email: 'doctor@clinic.com', password: DEFAULT_DOCTOR_PASSWORD, role: UserRole.DOCTOR, fullName: 'Доктор Иванов' },
 ];
 
 const PATIENT_DATA = {
@@ -46,20 +55,15 @@ const PERIOD_DATA = {
 };
 
 // Шаблоны вопросов для первых 3 дней
-const QUESTION_TEMPLATES = [
-    // День 1
-    { dayNumber: 1, timeSlot: TimeSlot.MORNING, questionText: 'Доброе утро! Как вы себя чувствуете?', responseType: ResponseType.TEXT },
-    { dayNumber: 1, timeSlot: TimeSlot.AFTERNOON, questionText: 'Приняли ли вы витамины?', responseType: ResponseType.TEXT },
-    { dayNumber: 1, timeSlot: TimeSlot.EVENING, questionText: 'Отправьте фото вашего ужина', responseType: ResponseType.PHOTO },
-    // День 2
-    { dayNumber: 2, timeSlot: TimeSlot.MORNING, questionText: 'Как прошла ночь? Выспались?', responseType: ResponseType.TEXT },
-    { dayNumber: 2, timeSlot: TimeSlot.AFTERNOON, questionText: 'Как ваше самочувствие?', responseType: ResponseType.TEXT },
-    { dayNumber: 2, timeSlot: TimeSlot.EVENING, questionText: 'Фото отчёт за день', responseType: ResponseType.TEXT_AND_PHOTO },
-    // День 3
-    { dayNumber: 3, timeSlot: TimeSlot.MORNING, questionText: 'Доброе утро! Есть ли жалобы?', responseType: ResponseType.TEXT },
-    { dayNumber: 3, timeSlot: TimeSlot.AFTERNOON, questionText: 'Всё ли в порядке с приёмом препаратов?', responseType: ResponseType.TEXT },
-    { dayNumber: 3, timeSlot: TimeSlot.EVENING, questionText: 'Итоги дня - как себя чувствуете?', responseType: ResponseType.TEXT },
-];
+// Генерация шаблонов вопросов для 14 дней
+const QUESTION_TEMPLATES: any[] = [];
+for (let day = 1; day <= 14; day++) {
+    QUESTION_TEMPLATES.push(
+        { dayNumber: day, timeSlot: TimeSlot.MORNING, questionText: `День ${day}: Как спалось?`, responseType: ResponseType.TEXT },
+        { dayNumber: day, timeSlot: TimeSlot.AFTERNOON, questionText: `День ${day}: Приняли лекарства?`, responseType: ResponseType.TEXT },
+        { dayNumber: day, timeSlot: TimeSlot.EVENING, questionText: `День ${day}: Отчет за день`, responseType: ResponseType.PHOTO }
+    );
+}
 
 // ============================================
 // ФУНКЦИИ SEED
@@ -198,40 +202,128 @@ async function seedPeriod(patientId: string) {
 }
 
 async function seedQuestionTemplates(periodId: string) {
-    console.log('\n❓ Создание шаблонов вопросов...');
+    console.log('\n❓ Создание шаблонов вопросов (14 дней)...');
 
     let created = 0;
-    let existing = 0;
 
-    for (const template of QUESTION_TEMPLATES) {
-        const exists = await prisma.questionTemplate.findFirst({
-            where: {
-                periodId,
-                dayNumber: template.dayNumber,
-                timeSlot: template.timeSlot,
-            },
-        });
+    // Используем createMany для скорости
+    const data = QUESTION_TEMPLATES.map(t => ({
+        ...t,
+        periodId,
+        order: 0,
+        isRequired: true,
+    }));
 
-        if (exists) {
-            existing++;
-            continue;
+    const result = await prisma.questionTemplate.createMany({
+        data,
+        skipDuplicates: true,
+    });
+
+    console.log(`   ✅ Создано ${result.count} шаблонов вопросов`);
+}
+
+async function seedAnswers(patientId: string, periodId: string) {
+    console.log('\n💬 Создание тестовых ответов (для графиков)...');
+
+    const today = new Date();
+    let count = 0;
+
+    // Создаем ответы за последние 7 дней
+    for (let i = 6; i >= 0; i--) {
+        const date = new Date(today);
+        date.setDate(date.getDate() - i);
+
+        // 1-3 ответа в день
+        const answersCount = Math.floor(Math.random() * 3) + 1;
+
+        for (let j = 0; j < answersCount; j++) {
+            await prisma.answer.create({
+                data: {
+                    dayNumber: 1, // Тут не важно для графика, главное дата создания
+                    timeSlot: j === 0 ? TimeSlot.MORNING : j === 1 ? TimeSlot.AFTERNOON : TimeSlot.EVENING,
+                    textContent: `Тестовый ответ за ${date.toLocaleDateString()}`,
+                    patientId,
+                    periodId,
+                    createdAt: date,
+                    isProcessed: true,
+                }
+            });
+            count++;
         }
+    }
+    console.log(`   ✅ Создано ${count} ответов за последние 7 дней`);
+}
 
-        await prisma.questionTemplate.create({
+async function seedAlertsAndTasks(patientId: string, trackerId: string, doctorId: string) {
+    console.log('\n🚨 Создание тестовых алёртов и задач...');
+
+    // Check if alerts already exist
+    const existingAlerts = await prisma.alert.count({ where: { patientId } });
+    if (existingAlerts > 0) {
+        console.log(`   ✓ ${existingAlerts} алёртов уже существует`);
+        return;
+    }
+
+    // Create test alerts with different risk levels
+    const alerts = [
+        {
+            type: AlertType.MISSED_RESPONSE,
+            title: 'Пропущен ответ на утренний вопрос',
+            description: 'Пациент не ответил на вопрос "Как вы себя чувствуете?" в течение 2 часов',
+            riskLevel: RiskLevel.MEDIUM,
+            status: AlertStatus.NEW,
+            patientId,
+            triggeredBy: 'SYSTEM',
+        },
+        {
+            type: AlertType.BAD_CONDITION,
+            title: 'Плохое самочувствие',
+            description: 'AI анализ выявил негативные симптомы в ответе пациента',
+            riskLevel: RiskLevel.HIGH,
+            status: AlertStatus.NEW,
+            patientId,
+            triggeredBy: 'AI_ANALYSIS',
+        },
+        {
+            type: AlertType.NO_PHOTO,
+            title: 'Не отправлено фото еды',
+            description: 'Пациент не отправил фото ужина за вчерашний день',
+            riskLevel: RiskLevel.LOW,
+            status: AlertStatus.IN_PROGRESS,
+            patientId,
+            triggeredBy: 'SYSTEM',
+        },
+    ];
+
+    for (const alertData of alerts) {
+        const alert = await prisma.alert.create({ data: alertData });
+        console.log(`   ✅ Создан алёрт: ${alertData.title} (${alertData.riskLevel})`);
+
+        // Create task for each alert
+        const taskType = alertData.type === AlertType.MISSED_RESPONSE ? TaskType.CALL :
+            alertData.type === AlertType.NO_PHOTO ? TaskType.CHECK_PHOTO :
+                TaskType.ESCALATE;
+
+        const dueDate = new Date();
+        dueDate.setDate(dueDate.getDate() + 1); // Due tomorrow
+
+        await prisma.task.create({
             data: {
-                ...template,
-                periodId,
-                order: 0,
-                isRequired: true,
-            },
+                type: taskType,
+                title: `Обработать: ${alertData.title}`,
+                description: alertData.description,
+                status: TaskStatus.PENDING,
+                priority: alertData.riskLevel === RiskLevel.HIGH ? 8 :
+                    alertData.riskLevel === RiskLevel.MEDIUM ? 5 : 3,
+                dueDate,
+                patientId,
+                assignedToId: trackerId,
+                alertId: alert.id,
+            }
         });
-        created++;
     }
 
-    console.log(`   ✅ Создано ${created} шаблонов вопросов`);
-    if (existing > 0) {
-        console.log(`   ✓ ${existing} шаблонов уже существовало`);
-    }
+    console.log(`   ✅ Создано 3 алёрта и 3 задачи`);
 }
 
 // ============================================
@@ -266,6 +358,12 @@ async function main() {
 
         // 5. Создаём шаблоны вопросов
         await seedQuestionTemplates(period.id);
+
+        // 6. Создаём тестовые алёрты и задачи
+        await seedAlertsAndTasks(patient.id, tracker1.id, doctor.id);
+
+        // 7. Создаём тестовые ответы
+        await seedAnswers(patient.id, period.id);
 
         console.log('\n' + '═'.repeat(50));
         console.log('✅ SEED ЗАВЕРШЁН УСПЕШНО!');

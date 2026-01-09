@@ -1,18 +1,27 @@
 import crypto from 'node:crypto';
-import { getEnvVar } from '../../config/index.js';
+import { logger } from '../../common/utils/logger.js';
 
 const ALGORITHM = 'aes-256-cbc';
-// Use a default key for dev if not provided, but warn in logs. 
-// In prod, ENCRYPTION_KEY must be 32 chars.
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || '12345678901234567890123456789012';
 const IV_LENGTH = 16;
+
+// ENCRYPTION_KEY is REQUIRED in production (32 characters)
+if (process.env.NODE_ENV === 'production' && !process.env.ENCRYPTION_KEY) {
+    throw new Error('ENCRYPTION_KEY is required in production');
+}
+
+// In development, use a default key with warning
+if (!process.env.ENCRYPTION_KEY) {
+    logger.warn('ENCRYPTION_KEY not set - using insecure default for development only');
+}
+
+const KEY = process.env.ENCRYPTION_KEY || 'dev-only-key-32-characters-here!';
 
 export function encrypt(text: string): string {
     if (!text) return '';
 
     // Ensure key is 32 bytes (pad or truncate if needed for dev strictly)
     // For production, we should enforce 32 bytes
-    const key = Buffer.from(ENCRYPTION_KEY.padEnd(32).slice(0, 32));
+    const key = Buffer.from(KEY.padEnd(32).slice(0, 32));
 
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
@@ -26,7 +35,7 @@ export function encrypt(text: string): string {
 export function decrypt(text: string): string {
     if (!text) return '';
 
-    const key = Buffer.from(ENCRYPTION_KEY.padEnd(32).slice(0, 32));
+    const key = Buffer.from(KEY.padEnd(32).slice(0, 32));
 
     const [ivHex, encryptedHex] = text.split(':');
     if (!ivHex || !encryptedHex) return text; // Return as is if not in our format

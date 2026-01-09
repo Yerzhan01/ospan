@@ -197,19 +197,20 @@ export class SchedulerService {
 
                     if (!existingAlert) {
                         logger.info({ patientId: period.patientId, questionId: q.id }, 'Creating MISSED_RESPONSE alert');
-                        await prisma.alert.create({
-                            data: {
-                                patientId: period.patientId,
-                                type: 'MISSED_RESPONSE',
-                                riskLevel: 'MEDIUM',
-                                title: 'Missed Report',
-                                description: `Patient missed report for Day ${checkDayNum}, ${q.timeSlot}`,
-                                triggeredBy: 'system',
-                                metadata: { questionId: q.id, dayNumber: checkDayNum }
-                            }
-                        });
 
-                        // TODO: Maybe send WhatsApp reminder?
+                        // Use AlertService to ensure task creation and notifications
+                        const { alertService } = await import('../alerts/alert.service.js');
+                        const { AlertType, RiskLevel } = await import('@prisma/client');
+
+                        await alertService.create({
+                            patientId: period.patientId,
+                            type: AlertType.MISSED_RESPONSE,
+                            riskLevel: RiskLevel.MEDIUM,
+                            title: 'Missed Report',
+                            description: `Patient missed report for Day ${checkDayNum}, ${q.timeSlot}`,
+                            triggeredBy: 'system',
+                            metadata: { questionId: q.id, dayNumber: checkDayNum }
+                        });
                     }
                 }
             }
@@ -264,6 +265,96 @@ export class SchedulerService {
             // await whatsappService.sendMessage(visit.patient.phone, message);
             logger.info({ visitId: visit.id, patientId: visit.patientId }, 'Would send Same-Day Visit Reminder');
         }
+    }
+
+    /**
+     * Отправка повторных напоминаний при пропуске (до эскалации)
+     */
+    async checkMissedReminders(): Promise<void> {
+        const prisma = await getPrisma();
+        const { whatsappService } = await import('../../integrations/whatsapp/whatsapp.service.js');
+        const { AlertType, AlertStatus } = await import('@prisma/client');
+
+        // Ищем пропущенные ответы (NEW), созданные более 2 часов назад
+        // Эскалация обычно через 4 часа, так что это промежуточное напоминание
+        const threshold = dayjs().subtract(2, 'hour').toDate();
+        const alerts = await prisma.alert.findMany({
+            where: {
+                type: AlertType.MISSED_RESPONSE,
+                status: AlertStatus.NEW,
+                createdAt: { lt: threshold },
+            },
+            include: { patient: true }
+        });
+
+        for (const alert of alerts) {
+            const meta = (alert.metadata as Record<string, any>) || {};
+            if (meta.reminderSent) continue;
+
+            if (alert.patient?.phone) {
+                try {
+                    await whatsappService.sendMessage(
+                        alert.patient.phone,
+                        `Здравствуйте, ${alert.patient.fullName}! Мы не получили ваш отчет. Пожалуйста, ответьте на вопросы, это важно для вашего лечения.`
+                    );
+
+                    // Mark as sent to avoid spam
+                    await prisma.alert.update({
+                        where: { id: alert.id },
+                        data: {
+                            metadata: { ...meta, reminderSent: true }
+                        }
+                    });
+
+                    logger.info({ alertId: alert.id }, 'Reminder sent for missed report');
+                } catch (error) {
+                    logger.error({ err: error, alertId: alert.id }, 'Failed to send missed report reminder');
+                }
+            }
+        }
+    }
+
+    /**
+     * Проверяет необработанные алёрты MISSED_RESPONSE
+     * Если алёрт NEW более X часов — автоматически эскалирует врачу
+     */
+    async checkUnhandledAlerts(): Promise<void> {
+        const prisma = await getPrisma();
+        const { config } = await import('../../config/index.js');
+        const { alertService } = await import('../alerts/alert.service.js');
+        const { AlertType, AlertStatus } = await import('@prisma/client');
+
+        const thresholdHours = config.alerts.escalationThresholdHours;
+        const thresholdDate = new Date(Date.now() - thresholdHours * 60 * 60 * 1000);
+
+        logger.info({ thresholdHours, thresholdDate }, 'Checking for unhandled alerts to auto-escalate');
+
+        const unhandledAlerts = await prisma.alert.findMany({
+            where: {
+                type: AlertType.MISSED_RESPONSE,
+                status: AlertStatus.NEW,
+                createdAt: { lt: thresholdDate }
+            },
+            include: { patient: true }
+        });
+
+        if (unhandledAlerts.length === 0) {
+            logger.info('No unhandled alerts to escalate');
+            return;
+        }
+
+        let escalatedCount = 0;
+        for (const alert of unhandledAlerts) {
+            try {
+                logger.info({ alertId: alert.id, patientId: alert.patientId }, 'Auto-escalating unhandled MISSED_RESPONSE alert');
+                await alertService.escalate(alert.id);
+                escalatedCount++;
+            } catch (err) {
+                logger.error({ err, alertId: alert.id }, 'Failed to auto-escalate alert');
+            }
+        }
+
+        logger.info({ total: unhandledAlerts.length, escalated: escalatedCount }, 'Auto-escalation completed');
     }
 }
 

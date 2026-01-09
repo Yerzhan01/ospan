@@ -36,7 +36,7 @@ export class PeriodService {
             throw AppError.conflict('У пациента уже есть активный период');
         }
 
-        return await prisma.$transaction(async (tx) => {
+        const period = await prisma.$transaction(async (tx) => {
             const startDate = dayjs(data.startDate).startOf('day').toDate();
             const endDate = dayjs(startDate).add(data.durationDays - 1, 'day').endOf('day').toDate();
 
@@ -94,6 +94,15 @@ export class PeriodService {
             logger.info({ periodId: period.id, patientId: data.patientId }, 'Period created successfully');
             return period;
         });
+
+        // Sync AmoCRM
+        if (period) {
+            this._syncAmoStatus(period).catch(err =>
+                logger.error({ err, periodId: period.id }, 'Failed to sync Amo status on create')
+            );
+        }
+
+        return period;
     }
 
     /**
@@ -146,7 +155,35 @@ export class PeriodService {
         const prisma = await getPrisma();
         return await prisma.period.findMany({
             where: { patientId },
-            orderBy: { createdAt: 'desc' },
+            orderBy: { startDate: 'desc' },
+            include: {
+                patient: {
+                    select: {
+                        id: true,
+                        fullName: true,
+                        phone: true
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Получить все периоды
+     */
+    async listAll(): Promise<Period[]> {
+        const prisma = await getPrisma();
+        return await prisma.period.findMany({
+            orderBy: { startDate: 'desc' },
+            include: {
+                patient: {
+                    select: {
+                        id: true,
+                        fullName: true,
+                        phone: true
+                    }
+                }
+            }
         });
     }
 
@@ -202,6 +239,13 @@ export class PeriodService {
         await prisma.$transaction(async (tx) => {
             await this._completePeriodInternal(tx, periodId, completedByUserId);
         });
+
+        const period = await prisma.period.findUnique({ where: { id: periodId } });
+        if (period) {
+            this._syncAmoStatus(period).catch(err =>
+                logger.error({ err, periodId: period.id }, 'Failed to sync Amo status on complete')
+            );
+        }
     }
 
     /**
@@ -238,6 +282,13 @@ export class PeriodService {
                 },
             });
         });
+
+        const cancelledPeriod = await prisma.period.findUnique({ where: { id: periodId } });
+        if (cancelledPeriod) {
+            this._syncAmoStatus(cancelledPeriod).catch(err =>
+                logger.error({ err, periodId: periodId }, 'Failed to sync Amo status on cancel')
+            );
+        }
     }
 
     // --- Private Helpers ---
@@ -294,4 +345,34 @@ export class PeriodService {
             }
         };
     }
+
+    /**
+     * Sync Period status to AmoCRM Lead
+     */
+    private async _syncAmoStatus(period: Period) {
+        try {
+            const prisma = await getPrisma();
+            const patient = await prisma.patient.findUnique({ where: { id: period.patientId } });
+
+            if (!patient?.amoCrmLeadId) return;
+
+            const { integrationService } = await import('../integrations/integration.service.js');
+            const { amoCRMService } = await import('../../integrations/amocrm/amocrm.service.js');
+
+            const statusResponse = await integrationService.getAmoCRMStatus();
+            const mapping = statusResponse.mapping || {};
+            const statusId = mapping[period.status];
+
+            if (statusId) {
+                const leadId = Number(patient.amoCrmLeadId);
+                if (!isNaN(leadId)) {
+                    await amoCRMService.updateLeadStatus(leadId, statusId);
+                    logger.info({ periodId: period.id, status: period.status, leadId, statusId }, 'Synced Period status to AmoCRM');
+                }
+            }
+        } catch (error) {
+            logger.error({ err: error, periodId: period.id }, 'Failed to sync Period status to AmoCRM');
+        }
+    }
 }
+

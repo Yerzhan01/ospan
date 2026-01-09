@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { userController } from './user.controller.js';
 import { authMiddleware } from '../../common/middleware/auth.js';
 import { roleGuard, adminOnly, managerOrAdmin } from '../../common/middleware/roleGuard.js';
+import { UpdateUserInput } from './user.schema.js';
 
 /**
  * Роутер модуля пользователей
@@ -42,6 +43,11 @@ export async function userRouter(app: FastifyInstance) {
         // POST /api/v1/auth/logout - выход
         protectedApp.post('/auth/logout', async (request, reply) => {
             return userController.logout(request, reply);
+        });
+
+        // PUT /api/v1/auth/profile - обновление профиля (доступно всем авторизованным)
+        protectedApp.put<{ Body: UpdateUserInput }>('/auth/profile', async (request, reply) => {
+            return userController.updateProfile(request, reply);
         });
 
         // POST /api/v1/auth/register - регистрация (только ADMIN)

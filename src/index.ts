@@ -2,6 +2,7 @@ import Fastify, { FastifyRequest, FastifyReply } from 'fastify';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 
 import { config, validateConfig } from './config/index.js';
 import { logger } from './common/utils/logger.js';
@@ -47,6 +48,19 @@ async function createApp() {
 
     // Cookies
     await app.register(cookie);
+
+    // Rate Limiting (DDoS protection)
+    await app.register(rateLimit, {
+        max: 100, // 100 requests per window
+        timeWindow: '1 minute',
+        errorResponseBuilder: () => ({
+            success: false,
+            error: {
+                message: 'Too many requests, please try again later',
+                code: 'RATE_LIMIT_EXCEEDED'
+            }
+        })
+    });
 
     // ============================================
     // ГЛОБАЛЬНЫЕ ХУКИ

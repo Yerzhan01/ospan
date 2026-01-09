@@ -45,6 +45,15 @@ interface Config {
         apiKey: string;
         model: string;
     };
+
+    alerts: {
+        escalationThresholdHours: number;
+    };
+
+    transcription: {
+        enabled: boolean;
+        openaiApiKey: string;
+    };
 }
 
 /**
@@ -123,7 +132,14 @@ export const config: Config = {
         model: getEnvVarWithDefault('AI_MODEL', 'gemini-2.0-flash'),
     },
 
+    alerts: {
+        escalationThresholdHours: parseInt(getEnvVarWithDefault('ESCALATION_THRESHOLD_HOURS', '4'), 10),
+    },
 
+    transcription: {
+        enabled: getEnvVarWithDefault('TRANSCRIPTION_ENABLED', 'false') === 'true',
+        openaiApiKey: getEnvVarWithDefault('OPENAI_API_KEY', ''),
+    },
 };
 
 /**

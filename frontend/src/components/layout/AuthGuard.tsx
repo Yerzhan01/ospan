@@ -15,7 +15,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         if (!hasChecked.current) {
             hasChecked.current = true;
-            checkAuth();
+            checkAuth().catch((err) => console.error('Auth check failed:', err));
         }
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

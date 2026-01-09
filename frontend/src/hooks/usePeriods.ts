@@ -1,17 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
+import type { Period } from '@/types/period';
 
-export interface Period {
-    id: string;
-    name: string;
-    startDate: string;
-    status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
-    patientId: string;
-    patient?: {
-        fullName: string;
-    };
-}
-
+// Re-export for backward compatibility
+export type { Period };
 export const periodKeys = {
     all: ['periods'] as const,
     list: () => [...periodKeys.all, 'list'] as const,

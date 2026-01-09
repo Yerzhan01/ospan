@@ -15,7 +15,7 @@ const fetchAlerts = async (filters: AlertFilters): Promise<Alert[]> => {
     const params = new URLSearchParams();
     if (filters.patientId) params.append('patientId', filters.patientId);
     if (filters.type) params.append('type', filters.type);
-    if (filters.status && filters.status !== 'all' as any) params.append('status', filters.status);
+    if (filters.status && filters.status !== 'all') params.append('status', filters.status);
     if (filters.riskLevel) params.append('riskLevel', filters.riskLevel);
     if (filters.assignedTo) params.append('assignedTo', filters.assignedTo);
 

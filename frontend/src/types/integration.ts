@@ -1,5 +1,5 @@
 export interface IntegrationStatus {
-    type: 'whatsapp' | 'amocrm';
+    type: 'whatsapp' | 'amocrm' | 'openai';
     isEnabled: boolean;
     isConfigured: boolean;
     status: 'connected' | 'pending_auth' | 'disconnected' | 'error';
@@ -21,6 +21,11 @@ export interface AmoCRMStatusResponse extends IntegrationStatus {
         name: string;
         statuses: Array<{ id: number; name: string; color: string }>;
     }>;
+    mapping?: Record<string, number>;
+}
+
+export interface SaveAmoCRMMappingDto {
+    mapping: Record<string, number>;
 }
 
 export interface SaveWhatsAppCredentialsDto {
@@ -39,3 +44,14 @@ export interface TestWhatsAppMessageDto {
     phone: string;
     message: string;
 }
+
+export interface SaveOpenAICredentialsDto {
+    apiKey: string;
+    model?: string;
+}
+
+export interface OpenAIStatusResponse extends IntegrationStatus {
+    type: 'openai';
+    model?: string;
+}
+

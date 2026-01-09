@@ -34,7 +34,7 @@ export interface Alert {
 export interface AlertFilters {
     patientId?: string;
     type?: AlertType;
-    status?: AlertStatus;
+    status?: AlertStatus | 'all';
     riskLevel?: RiskLevel;
     assignedTo?: string; // trackerId
     page?: number;

@@ -18,6 +18,9 @@ export async function periodRoutes(fastify: FastifyInstance) {
         controller.create
     );
 
+    // GET /api/v1/periods - Список всех периодов
+    fastify.get('/', controller.listAll);
+
     // GET /api/v1/periods/:id - Детали периода
     fastify.get('/:id', controller.getById);
 

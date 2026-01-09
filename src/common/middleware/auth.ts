@@ -1,9 +1,10 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { AppError } from '../errors/AppError.js';
 import { config } from '../../config/index.js';
+import type { UserRole } from '../../modules/users/user.types.js';
 
-// Роли пользователей (дублируем из Prisma для избежания зависимости от generated client)
-export type UserRole = 'ADMIN' | 'TRACKER' | 'DOCTOR' | 'OPERATOR';
+// Re-export UserRole for convenience
+export type { UserRole };
 
 // Тип пользователя в JWT payload
 export interface JwtUser {

@@ -3,7 +3,6 @@ import { defineConfig } from 'prisma/config';
 import 'dotenv/config';
 
 // URL базы данных
-console.log('DEBUG: DATABASE_URL from env:', process.env.DATABASE_URL);
 const dbUrl = process.env.DATABASE_URL;
 
 export default defineConfig({

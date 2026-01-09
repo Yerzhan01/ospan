@@ -1,12 +1,32 @@
 import { AIProviderFactory } from './ai.provider.js';
 import { aiConfig } from './ai.config.js';
-import { AnalysisResult } from './ai.types.js';
+import { AnalysisResult, AIProvider } from './ai.types.js';
 import { SYSTEM_PROMPT_MEDICAL_ANALYSIS, PROMPT_PHOTO_ANALYSIS } from './ai.prompts.js';
 import { getPrisma } from '../../config/database.js';
 import { logger } from '../../common/utils/logger.js';
 
 export class AIService {
-    private provider = AIProviderFactory.create(aiConfig);
+    private provider: AIProvider;
+    private currentConfig = aiConfig;
+
+    constructor() {
+        this.provider = AIProviderFactory.create(this.currentConfig);
+    }
+
+    hasApiKey(): boolean {
+        return !!this.currentConfig.apiKey;
+    }
+
+    updateConfig(apiKey: string, model?: string) {
+        this.currentConfig = {
+            ...this.currentConfig,
+            apiKey,
+            model: model || this.currentConfig.model
+        };
+        // Re-create provider
+        this.provider = AIProviderFactory.create(this.currentConfig);
+        logger.info('AI Service re-initialized with new config');
+    }
 
     /**
      * Analyzes a text response from a patient

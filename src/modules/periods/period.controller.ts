@@ -47,6 +47,15 @@ export class PeriodController {
         });
     };
 
+    listAll = async (request: FastifyRequest, reply: FastifyReply) => {
+        const periods = await this.service.listAll();
+
+        return reply.send({
+            success: true,
+            data: periods,
+        });
+    };
+
     completeDay = async (request: FastifyRequest, reply: FastifyReply) => {
         const { id } = periodIdSchema.parse(request.params);
         const body = completeDaySchema.parse(request.body);

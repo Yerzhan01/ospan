@@ -47,9 +47,11 @@ export function TasksWidget() {
                                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                     <span className="flex items-center gap-1">
                                         <Calendar className="h-3 w-3" />
-                                        {isToday(new Date(task.dueDate))
-                                            ? 'Сегодня'
-                                            : format(new Date(task.dueDate), 'd MMM', { locale: ru })
+                                        {task.dueDate
+                                            ? (isToday(new Date(task.dueDate))
+                                                ? 'Сегодня'
+                                                : format(new Date(task.dueDate), 'd MMM', { locale: ru }))
+                                            : 'Без срока'
                                         }
                                     </span>
                                     {task.patient && <span>• {task.patient.fullName}</span>}

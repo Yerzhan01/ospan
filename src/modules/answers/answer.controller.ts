@@ -59,6 +59,16 @@ export class AnswerController {
 
         return reply.send(answer);
     }
+
+    // GET /api/v1/answers/stats
+    async getStats(
+        request: FastifyRequest<{ Querystring: { days?: number } }>,
+        reply: FastifyReply
+    ) {
+        const { days } = request.query || {};
+        const stats = await answerService.getStats(days ? Number(days) : 7);
+        return reply.send({ success: true, data: stats });
+    }
 }
 
 export const answerController = new AnswerController();

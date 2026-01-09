@@ -29,5 +29,15 @@ export function initSchedulerCron() {
         schedulerService.checkVisits().catch(err => {
             logger.error({ err }, 'Error in periodic visit checking');
         });
+
+        // Проверка пропущенных напоминаний (до эскалации)
+        schedulerService.checkMissedReminders().catch(err => {
+            logger.error({ err }, 'Error in missed reminders check');
+        });
+
+        // Проверка необработанных алёртов для автоэскалации
+        schedulerService.checkUnhandledAlerts().catch(err => {
+            logger.error({ err }, 'Error in unhandled alerts check');
+        });
     }, ONE_HOUR);
 }

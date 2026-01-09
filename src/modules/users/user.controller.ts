@@ -12,8 +12,14 @@ import {
     refreshTokenSchema,
     userListQuerySchema,
     userIdParamSchema,
+    CreateUserInput,
+    UpdateUserInput,
+    LoginInput,
+    RefreshTokenInput,
+    UserListQuery,
+    UserIdParam
 } from './user.schema.js';
-import type { UserFilters, UserRole } from './user.types.js';
+import type { UserFilters, UserRole, UpdateUserDto } from './user.types.js';
 
 const logger = moduleLogger('UserController');
 
@@ -168,6 +174,12 @@ export class UserController {
         }
 
         return reply.send(successResponse(user));
+    }
+
+    async updateProfile(request: FastifyRequest<{ Body: UpdateUserInput }>, reply: FastifyReply) {
+        const userId = (request as any).user.userId;
+        const result = await userService.update(userId, request.body as UpdateUserDto);
+        return reply.send(successResponse(result));
     }
 
     /**

@@ -27,6 +27,9 @@ export async function patientRoutes(fastify: FastifyInstance) {
     // GET /api/v1/patients/:id/calendar - Календарь пациента
     fastify.get('/:id/calendar', controller.getCalendar);
 
+    // GET /api/v1/patients/:id/tasks - Задачи пациента
+    fastify.get('/:id/tasks', controller.getTasks);
+
     // POST /api/v1/patients - Создание пациента (Админ, Трекер)
     fastify.post(
         '/',

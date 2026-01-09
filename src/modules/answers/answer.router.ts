@@ -9,6 +9,7 @@ export async function answerRoutes(app: FastifyInstance) {
 
     app.get('/patients/:patientId/answers', answerController.getPatientAnswers);
     app.get('/periods/:periodId/answers', answerController.getPeriodAnswers);
+    app.get('/answers/stats', answerController.getStats);
     app.get('/answers/:id', answerController.getAnswerById);
 
 }

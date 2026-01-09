@@ -2,6 +2,7 @@ import { FastifyRequest, FastifyReply } from 'fastify';
 import { taskService } from './task.service.js';
 import { TaskStatus, TaskType } from '@prisma/client';
 import { CreateTaskDto, UpdateTaskDto, TaskFilters } from './task.types.js';
+import { successResponse, paginatedResponse, errorResponse } from '../../common/utils/response.js';
 
 class TaskController {
 
@@ -12,9 +13,17 @@ class TaskController {
         }>,
         reply: FastifyReply
     ) {
-        const { page, limit, ...filters } = request.query;
-        const result = await taskService.list(filters, page, limit);
-        return reply.send(result);
+        const { page = 1, limit = 20, ...filters } = request.query;
+        const pageNum = Number(page);
+        const limitNum = Number(limit);
+
+        const { items, total } = await taskService.list(filters, pageNum, limitNum);
+
+        return reply.send(paginatedResponse(items, {
+            page: pageNum,
+            limit: limitNum,
+            total
+        }));
     }
 
     // GET /api/v1/tasks/my
@@ -24,10 +33,10 @@ class TaskController {
     ) {
         const userId = (request.user as any)?.userId;
         if (!userId) {
-            return reply.status(400).send({ error: 'User ID not found' });
+            return reply.status(400).send(errorResponse('User ID not found', 'USER_ID_MISSING'));
         }
         const result = await taskService.getMyTasks(userId);
-        return reply.send(result);
+        return reply.send(successResponse(result));
     }
 
     // GET /api/v1/tasks/:id
@@ -37,9 +46,9 @@ class TaskController {
     ) {
         const task = await taskService.findById(request.params.id);
         if (!task) {
-            return reply.status(404).send({ error: 'Task not found' });
+            return reply.status(404).send(errorResponse('Task not found', 'TASK_NOT_FOUND'));
         }
-        return reply.send(task);
+        return reply.send(successResponse(task));
     }
 
     // POST /api/v1/tasks
@@ -49,7 +58,7 @@ class TaskController {
     ) {
         // Enforce validations if needed
         const task = await taskService.create(request.body);
-        return reply.status(201).send(task);
+        return reply.status(201).send(successResponse(task));
     }
 
     // PUT /api/v1/tasks/:id/status
@@ -62,7 +71,7 @@ class TaskController {
     ) {
         const userId = (request.user as any)?.userId; // Who updated it
         const task = await taskService.updateStatus(request.params.id, request.body.status, userId);
-        return reply.send(task);
+        return reply.send(successResponse(task));
     }
 
     // PUT /api/v1/tasks/:id/reassign
@@ -74,8 +83,21 @@ class TaskController {
         reply: FastifyReply
     ) {
         const task = await taskService.reassign(request.params.id, request.body.assignedToId);
-        return reply.send(task);
+        return reply.send(successResponse(task));
+    }
+
+    // PUT /api/v1/tasks/:id
+    async update(
+        request: FastifyRequest<{
+            Params: { id: string };
+            Body: UpdateTaskDto
+        }>,
+        reply: FastifyReply
+    ) {
+        const task = await taskService.update(request.params.id, request.body);
+        return reply.send(successResponse(task));
     }
 }
+
 
 export const taskController = new TaskController();

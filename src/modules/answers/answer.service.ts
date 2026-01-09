@@ -121,15 +121,42 @@ export class AnswerService {
 
         // 5. Create Answer
         let textBody = '';
+        let mediaUrl: string | undefined;
+
         if (message.messageData.typeMessage === 'textMessage') {
             textBody = message.messageData.textMessageData?.textMessage || '';
         } else if (message.messageData.typeMessage === 'extendedTextMessage') {
             textBody = message.messageData.extendedTextMessageData?.text || '';
+        } else if (message.messageData.typeMessage === 'audioMessage') {
+            // Handle voice messages
+            const audioUrl = message.messageData.fileMessageData?.downloadUrl;
+            if (audioUrl) {
+                mediaUrl = audioUrl;
+
+                // Try transcription if enabled
+                const { transcriptionService } = await import('../../integrations/ai/transcription.service.js');
+                const transcriptionResult = await transcriptionService.transcribeAudio(audioUrl);
+
+                if (transcriptionResult?.text) {
+                    textBody = transcriptionResult.text;
+                    logger.info({ patientId: patient.id, textLength: textBody.length }, 'Voice message transcribed');
+                } else {
+                    textBody = '[Голосовое сообщение]';
+                    logger.info({ patientId: patient.id }, 'Voice message saved without transcription');
+                }
+            }
+        } else if (message.messageData.typeMessage === 'imageMessage') {
+            // Handle image messages
+            const imageUrl = message.messageData.fileMessageData?.downloadUrl;
+            if (imageUrl) {
+                mediaUrl = imageUrl;
+                textBody = message.messageData.fileMessageData?.caption || '[Фото]';
+            }
         }
-        // TODO: Handle media mapping
 
         const answerData: CreateAnswerDto = {
             text: textBody,
+            mediaUrl: mediaUrl,
             patientId: patient.id,
             periodId: period.id,
             questionTemplateId: targetQuestion.id,
@@ -186,11 +213,47 @@ export class AnswerService {
         });
     }
 
-    async getMissedResponses(patientId: string, periodId: string) {
-        // Find all questions up to current time that don't have answers.
-        // This is complex, might need a raw query or logic iteration.
-        // Leaving placeholder/simplified for now.
-        return [];
+    async getStats(days = 7): Promise<{ date: string; count: number }[]> {
+        const prisma = await getPrisma();
+        const endDate = dayjs();
+        const startDate = endDate.subtract(days, 'day');
+
+        // Group by creation date
+        // Since sqlite/prisma might not support intricate date grouping easily in groupBy for all timestamps,
+        // we can fetch all answers in range and aggregate in JS or use raw query.
+        // For portability (if moving to Postgres later), let's use JS aggregation for now or groupBy raw.
+        // Prisma groupBy on DateTime fields groups by exact timestamp, which is usefulness.
+        // We typically need raw query for date_trunc.
+
+        // Simpler approach: fetch all and reduce.
+        const answers = await prisma.answer.findMany({
+            where: {
+                createdAt: {
+                    gte: startDate.toDate(),
+                    lte: endDate.toDate()
+                }
+            },
+            select: { createdAt: true }
+        });
+
+        const stats: Record<string, number> = {};
+
+        // Initialize last 7 days with 0
+        for (let i = 0; i < days; i++) {
+            const dateStr = endDate.subtract(i, 'day').format('YYYY-MM-DD');
+            stats[dateStr] = 0;
+        }
+
+        answers.forEach(a => {
+            const dateStr = dayjs(a.createdAt).format('YYYY-MM-DD');
+            if (stats[dateStr] !== undefined) {
+                stats[dateStr]++;
+            }
+        });
+
+        return Object.entries(stats)
+            .map(([date, count]) => ({ date, count }))
+            .sort((a, b) => a.date.localeCompare(b.date));
     }
 }
 

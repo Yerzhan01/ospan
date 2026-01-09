@@ -69,10 +69,10 @@ export class QuestionService {
     /**
      * Получить все вопросы периода (сгруппированные по дням и слотам)
      */
-    async findByPeriod(periodId: string): Promise<QuestionSchedule> {
+    async findByPeriod(periodId: string): Promise<QuestionTemplate[]> {
         const prisma = await getPrisma();
 
-        const questions = await prisma.questionTemplate.findMany({
+        return await prisma.questionTemplate.findMany({
             where: { periodId },
             orderBy: [
                 { dayNumber: 'asc' },
@@ -80,21 +80,6 @@ export class QuestionService {
                 { order: 'asc' }
             ]
         });
-
-        const schedule: QuestionSchedule = {};
-
-        questions.forEach(q => {
-            if (!schedule[q.dayNumber]) {
-                schedule[q.dayNumber] = {
-                    [TimeSlot.MORNING]: [],
-                    [TimeSlot.AFTERNOON]: [],
-                    [TimeSlot.EVENING]: [],
-                };
-            }
-            schedule[q.dayNumber][q.timeSlot].push(q);
-        });
-
-        return schedule;
     }
 
     /**
@@ -108,6 +93,17 @@ export class QuestionService {
                 { timeSlot: 'asc' },
                 { order: 'asc' }
             ]
+        });
+    }
+
+    /**
+     * Получить вопросы конкретного слота
+     */
+    async findForSlot(periodId: string, dayNumber: number, timeSlot: TimeSlot): Promise<QuestionTemplate[]> {
+        const prisma = await getPrisma();
+        return await prisma.questionTemplate.findMany({
+            where: { periodId, dayNumber, timeSlot },
+            orderBy: { order: 'asc' }
         });
     }
 

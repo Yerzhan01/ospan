@@ -17,4 +17,8 @@ export async function tasksRouter(app: FastifyInstance) {
     // Actions
     app.put('/tasks/:id/status', taskController.updateStatus);
     app.put('/tasks/:id/reassign', taskController.reassign);
+
+    // Full update
+    app.put('/tasks/:id', taskController.update);
 }
+

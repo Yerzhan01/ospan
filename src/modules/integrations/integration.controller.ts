@@ -3,7 +3,8 @@ import { integrationService } from './integration.service.js';
 import {
     SaveWhatsAppCredentialsDto,
     SaveAmoCRMCredentialsDto,
-    TestWhatsAppMessageDto
+    TestWhatsAppMessageDto,
+    SaveOpenAICredentialsDto
 } from './integration.types.js';
 import { config } from '../../config/index.js';
 
@@ -47,6 +48,19 @@ export class IntegrationController {
         return reply.send({ success: true });
     }
 
+    // ===== OpenAI =====
+
+    async saveOpenAICredentials(request: FastifyRequest<{ Body: any }>, reply: FastifyReply) {
+        // Body should match SaveOpenAICredentialsDto but using any to avoid import loop or quick fix
+        const result = await integrationService.saveOpenAICredentials(request.body as SaveOpenAICredentialsDto);
+        return reply.send(result);
+    }
+
+    async disconnectOpenAI(request: FastifyRequest, reply: FastifyReply) {
+        await integrationService.disconnectOpenAI();
+        return reply.send({ success: true });
+    }
+
     // ===== AmoCRM =====
 
     async getAmoCRMStatus(request: FastifyRequest, reply: FastifyReply) {
@@ -84,6 +98,11 @@ export class IntegrationController {
     async syncAmoCRMPipelines(request: FastifyRequest, reply: FastifyReply) {
         const pipelines = await integrationService.syncAmoCRMPipelines();
         return reply.send(pipelines);
+    }
+
+    async saveAmoCRMMapping(request: FastifyRequest<{ Body: { mapping: Record<string, number> } }>, reply: FastifyReply) {
+        const mapping = await integrationService.saveAmoCRMMapping(request.body.mapping);
+        return reply.send({ success: true, mapping });
     }
 
     async disconnectAmoCRM(request: FastifyRequest, reply: FastifyReply) {

@@ -7,10 +7,12 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { cn } from '@/lib/utils';
+import { riskLevelLabels, riskLevelColors } from '@/lib/localization';
 
 export function AlertsWidget() {
+    // Show all open alerts (NEW + IN_PROGRESS), not just NEW
     const { data: alerts, isLoading } = useAlerts({
-        status: 'NEW', // Only show new alerts? or non-resolved. Let's show NEW + IN_PROGRESS 
         limit: 5
     });
 
@@ -48,8 +50,8 @@ export function AlertsWidget() {
                                     <p className="text-xs text-muted-foreground">{alert.patient?.fullName}</p>
                                 </div>
                             </div>
-                            <Badge variant="outline" className="text-xs">
-                                {alert.riskLevel}
+                            <Badge variant={riskLevelColors[alert.riskLevel] || 'outline'} className="text-xs">
+                                {riskLevelLabels[alert.riskLevel] || alert.riskLevel}
                             </Badge>
                         </div>
                     ))
@@ -58,5 +60,3 @@ export function AlertsWidget() {
         </Card>
     );
 }
-
-import { cn } from '@/lib/utils';

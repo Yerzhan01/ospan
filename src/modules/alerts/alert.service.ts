@@ -1,10 +1,26 @@
-import { AlertStatus, Prisma, TaskType, AlertType } from '@prisma/client';
+import { AlertStatus, Prisma, TaskType, AlertType, TaskStatus } from '@prisma/client';
 import { getPrisma } from '../../config/database.js';
 import { logger } from '../../common/utils/logger.js';
 import { AlertWithDetails, CreateAlertDto, UpdateAlertDto, AlertFilters } from './alert.types.js';
 import { alertNotificationService } from './alert.notifications.js';
 
 export class AlertService {
+
+    /**
+     * Determine TaskType based on AlertType
+     */
+    private getTaskTypeForAlert(alertType: AlertType): TaskType {
+        switch (alertType) {
+            case AlertType.MISSED_RESPONSE:
+                return TaskType.CALL;
+            case AlertType.NO_PHOTO:
+                return TaskType.CHECK_PHOTO;
+            case AlertType.BAD_CONDITION:
+                return TaskType.ESCALATE;
+            default:
+                return TaskType.CUSTOM;
+        }
+    }
 
     /**
      * Create a new alert and assign a task to the tracker
@@ -26,16 +42,20 @@ export class AlertService {
 
         // 2. Create Task for Tracker (if assigned)
         if (alert.patient.trackerId) {
+            // Default dueDate: +1 day for reaction
+            const dueDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
             await prisma.task.create({
                 data: {
-                    type: TaskType.ESCALATE, // Default task type for alert handling? Or CUSTOM?
+                    type: this.getTaskTypeForAlert(data.type),
                     title: `Handle Alert: ${data.title}`,
                     description: data.description,
                     priority: data.riskLevel === 'CRITICAL' ? 10 : 5,
                     patientId: data.patientId,
                     assignedToId: alert.patient.trackerId,
                     alertId: alert.id,
-                    status: 'PENDING'
+                    status: 'PENDING',
+                    dueDate
                 }
             });
 
@@ -126,8 +146,20 @@ export class AlertService {
             include: { patient: true, answer: true }
         });
 
-        // Check if we should resolve related Tasks?
-        // Optional logic: if resolved, cancel pending tasks
+        // Auto-complete related tasks when alert is resolved
+        if (data.status === AlertStatus.RESOLVED) {
+            await prisma.task.updateMany({
+                where: {
+                    alertId: id,
+                    status: { not: TaskStatus.COMPLETED }
+                },
+                data: {
+                    status: TaskStatus.COMPLETED,
+                    completedAt: new Date()
+                }
+            });
+            logger.info({ alertId: id }, 'Auto-completed related tasks on alert resolve');
+        }
 
         return alert as unknown as AlertWithDetails;
     }
@@ -144,6 +176,13 @@ export class AlertService {
         const doctorId = escalatedTo || alert.patient.doctorId;
         if (!doctorId) throw new Error('No doctor to escalate to');
 
+        // Cancel tracker's task before creating doctor's task
+        await prisma.task.updateMany({
+            where: { alertId: id, status: TaskStatus.PENDING },
+            data: { status: TaskStatus.CANCELLED }
+        });
+        logger.info({ alertId: id }, 'Cancelled tracker task on escalation');
+
         // Update status
         const updatedAlert = await prisma.alert.update({
             where: { id },
@@ -151,7 +190,8 @@ export class AlertService {
             include: { patient: true, answer: true }
         });
 
-        // Create Task for Doctor
+        // Create Task for Doctor with dueDate
+        const dueDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
         await prisma.task.create({
             data: {
                 type: TaskType.ESCALATE,
@@ -161,7 +201,8 @@ export class AlertService {
                 patientId: alert.patientId,
                 assignedToId: doctorId,
                 alertId: alert.id,
-                status: 'PENDING'
+                status: 'PENDING',
+                dueDate
             }
         });
 
@@ -184,8 +225,9 @@ export class AlertService {
 
     async getStatsByTracker(trackerId: string) {
         const prisma = await getPrisma();
+        const { default: dayjs } = await import('dayjs');
 
-        // Count by status for patients of this tracker
+        // 1. Count by status
         const stats = await prisma.alert.groupBy({
             by: ['status'],
             where: {
@@ -194,11 +236,49 @@ export class AlertService {
             _count: true
         });
 
-        // Example output: [{ status: 'NEW', _count: 5 }, ...]
-        return stats.reduce((acc, curr) => {
+        const statusCounts = stats.reduce((acc, curr) => {
             acc[curr.status] = curr._count;
             return acc;
         }, {} as Record<string, number>);
+
+        // 2b. Count by Risk Level
+        const riskStats = await prisma.alert.groupBy({
+            by: ['riskLevel'],
+            where: {
+                patient: { trackerId },
+                status: { not: 'RESOLVED' } // Only open alerts
+            },
+            _count: true
+        });
+
+        const riskCounts = riskStats.reduce((acc, curr) => {
+            acc[curr.riskLevel] = curr._count;
+            return acc;
+        }, {} as Record<string, number>);
+
+        // 3. Calculate Average Average  Reaction Time
+        // Alerts that are no longer NEW implies they have been processed
+        const reactedAlerts = await prisma.alert.findMany({
+            where: {
+                patient: { trackerId },
+                status: { not: 'NEW' }
+            },
+            select: { createdAt: true, updatedAt: true }
+        });
+
+        let avgReactionMinutes = 0;
+        if (reactedAlerts.length > 0) {
+            const totalMinutes = reactedAlerts.reduce((sum, alert) => {
+                return sum + dayjs(alert.updatedAt).diff(dayjs(alert.createdAt), 'minute');
+            }, 0);
+            avgReactionMinutes = Math.round(totalMinutes / reactedAlerts.length);
+        }
+
+        return {
+            ...statusCounts,
+            ...riskCounts, // e.g. CRITICAL: 5
+            avgReactionMinutes
+        };
     }
 }
 

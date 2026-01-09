@@ -13,9 +13,15 @@ export class AmoCRMAuthService {
     /**
      * Re-initialize the service with new configuration
      */
-    public reinitialize(newConfig: AmoCRMConfig | null) {
+    public async reinitialize(newConfig: AmoCRMConfig | null) {
+        // Close existing Redis connection to prevent leak
+        if (this.redis) {
+            await this.redis.quit();
+            this.redis = null;
+        }
+
         this.amoCrmConfig = newConfig;
-        if (this.amoCrmConfig && !this.redis) {
+        if (this.amoCrmConfig) {
             this.redis = new Redis(config.redis.url);
         }
         logger.info('AmoCRMAuthService re-initialized');
@@ -34,13 +40,17 @@ export class AmoCRMAuthService {
     /**
      * Get URL for user authorization
      */
+    /**
+     * Get URL for user authorization
+     */
     getAuthUrl(): string | null {
         if (!this.amoCrmConfig) {
             logger.warn('AmoCRM not configured');
             return null;
         }
         const { domain, clientId, redirectUri } = this.amoCrmConfig;
-        return `https://${domain}/oauth?client_id=${clientId}&state=state&mode=post_message`;
+        const host = domain.includes('.') ? domain : `${domain}.amocrm.ru`;
+        return `https://${host}/oauth?client_id=${clientId}&state=state&mode=post_message`;
     }
 
     async getAuthorizationUrl(clientId: string, redirectUri: string): Promise<string> {
@@ -52,7 +62,8 @@ export class AmoCRMAuthService {
     }
 
     async handleCallback(code: string, clientId: string, clientSecret: string, redirectUri: string, subdomain: string): Promise<AmoCRMTokens> {
-        const url = `https://${subdomain}.amocrm.ru/oauth2/access_token`;
+        const host = subdomain.includes('.') ? subdomain : `${subdomain}.amocrm.ru`;
+        const url = `https://${host}/oauth2/access_token`;
 
         try {
             const response = await fetch(url, {
@@ -89,7 +100,8 @@ export class AmoCRMAuthService {
      * Helper to refresh token if needed (to be called by service methods)
      */
     async refreshTokenIfNeeded(refreshToken: string, clientId: string, clientSecret: string, redirectUri: string, subdomain: string): Promise<AmoCRMTokens | null> {
-        const url = `https://${subdomain}.amocrm.ru/oauth2/access_token`;
+        const host = subdomain.includes('.') ? subdomain : `${subdomain}.amocrm.ru`;
+        const url = `https://${host}/oauth2/access_token`;
 
         try {
             const response = await fetch(url, {
@@ -130,9 +142,10 @@ export class AmoCRMAuthService {
             return null;
         }
         const { domain, clientId, clientSecret, redirectUri } = this.amoCrmConfig;
+        const host = domain.includes('.') ? domain : `${domain}.amocrm.ru`;
 
         try {
-            const response = await axios.post(`https://${domain}/oauth2/access_token`, {
+            const response = await axios.post(`https://${host}/oauth2/access_token`, {
                 client_id: clientId,
                 client_secret: clientSecret,
                 grant_type: 'authorization_code',
@@ -181,9 +194,10 @@ export class AmoCRMAuthService {
     private async refreshTokens(refreshToken: string): Promise<AmoCRMTokens | null> {
         if (!this.amoCrmConfig) return null;
         const { domain, clientId, clientSecret, redirectUri } = this.amoCrmConfig;
+        const host = domain.includes('.') ? domain : `${domain}.amocrm.ru`;
 
         try {
-            const response = await axios.post(`https://${domain}/oauth2/access_token`, {
+            const response = await axios.post(`https://${host}/oauth2/access_token`, {
                 client_id: clientId,
                 client_secret: clientSecret,
                 grant_type: 'refresh_token',
